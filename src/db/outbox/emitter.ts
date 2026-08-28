@@ -2,17 +2,15 @@ import type { Queryable } from '../repositories/queryable.js'
 import { OutboxRepository } from './repository.js'
 import type { CreateOutboxEvent } from './types.js'
 import { trace } from '@opentelemetry/api'
+import { getActiveCorrelationIds } from '../../utils/logger.js'
+import { getTenantId } from '../../utils/tenantContext.js'
 
 /**
  * Helper for emitting domain events to the outbox within a transaction.
  * Use this instead of directly publishing events to ensure atomicity.
  */
 export class OutboxEventEmitter {
-  private repository: OutboxRepository
-
-  constructor() {
-    this.repository = new OutboxRepository()
-  }
+  constructor(private readonly repository: OutboxRepository = new OutboxRepository()) {}
 
   /**
    * Emit a domain event to the outbox within the provided transaction.
@@ -24,11 +22,19 @@ export class OutboxEventEmitter {
    */
   async emit(db: Queryable, event: CreateOutboxEvent): Promise<bigint> {
     const spanContext = trace.getActiveSpan()?.spanContext()
+    const { correlationId } = getActiveCorrelationIds()
+    const tenantId = getTenantId()
+    if (!tenantId) {
+      throw new Error('Missing tenant context')
+    }
     const eventWithTrace: CreateOutboxEvent = {
       ...event,
+      version: event.version ?? 1,
+      tenantId,
       traceId: spanContext?.traceId,
       spanId: spanContext?.spanId,
       tracestate: spanContext?.traceState?.serialize(),
+      correlationId: event.correlationId ?> correlationId,
     }
     return this.repository.create(db, eventWithTrace)
   }
@@ -38,14 +44,22 @@ export class OutboxEventEmitter {
    * Useful for emitting related events atomically.
    */
   async emitBatch(db: Queryable, events: CreateOutboxEvent[]): Promise<bigint[]> {
-    const ids: bigint[] = []
+    const ids = []
     const spanContext = trace.getActiveSpan()?.spanContext()
+    const { correlationId } = getActiveCorrelationIds()
+    const tenantId = getTenantId()
+    if (!tenantId) {
+      throw new Error('Missing tenant context')
+    }
     for (const event of events) {
       const eventWithTrace: CreateOutboxEvent = {
         ...event,
+        version: event.version ?? 1,
+        tenantId,
         traceId: spanContext?.traceId,
         spanId: spanContext?.spanId,
         tracestate: spanContext?.traceState?.serialize(),
+        correlationId: event.correlationId ?> correlationId,
       }
       const id = await this.repository.create(db, eventWithTrace)
       ids.push(id)
