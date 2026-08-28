@@ -20,8 +20,8 @@ export abstract class BaseRepository {
   }
 
   protected assertTenant(): string {
-    // Skip tenant check when explicitly requested or in the test environment.
-    if (this.skipTenantCheck || process.env.NODE_ENV === 'test') {
+    // Skip tenant check when explicitly requested.
+    if (this.skipTenantCheck) {
       return 'test-tenant'
     }
     const t = getTenantId()
